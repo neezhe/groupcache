@@ -24,14 +24,14 @@ import (
 )
 
 type Hash func(data []byte) uint32
-
+//Map结构中replicas的含义是增加虚拟桶，使数据分布更加均匀
 type Map struct {
 	hash     Hash
 	replicas int
 	keys     []int // Sorted
 	hashMap  map[int]string
 }
-
+// 创建Map结构
 func New(replicas int, fn Hash) *Map {
 	m := &Map{
 		replicas: replicas,
@@ -50,6 +50,7 @@ func (m *Map) IsEmpty() bool {
 }
 
 // Adds some keys to the hash.
+// 添加新的Key
 func (m *Map) Add(keys ...string) {
 	for _, key := range keys {
 		for i := 0; i < m.replicas; i++ {
@@ -62,6 +63,7 @@ func (m *Map) Add(keys ...string) {
 }
 
 // Gets the closest item in the hash to the provided key.
+// 根据hash(key)获取value
 func (m *Map) Get(key string) string {
 	if m.IsEmpty() {
 		return ""

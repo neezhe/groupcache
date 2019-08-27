@@ -86,7 +86,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 
 // If peers is nil, the peerPicker is called via a sync.Once to initialize it.
 func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *Group {
-	if getter == nil {
+	if getter == nil { //需要先判断一下这个分组存在与否,重复创建分组,会panic.
 		panic("nil Getter")
 	}
 	mu.Lock()
@@ -139,17 +139,18 @@ func callInitPeerServer() {
 // A Group is a cache namespace and associated data loaded spread over
 // a group of 1 or more machines.
 type Group struct {
-	name       string
-	getter     Getter
+	name       string //group的名字，必须唯一
+	getter     Getter   //getter方法，用于从缓存失效后从数据库或其他地方获取数据.// 获取value的wrapper
+	//分布式支持
 	peersOnce  sync.Once
-	peers      PeerPicker
-	cacheBytes int64 // limit for sum of mainCache and hotCache size
+	peers      PeerPicker // 用于获取peer
+	cacheBytes int64 // mainCache和hotCache的总大小限制
 
 	// mainCache is a cache of the keys for which this process
 	// (amongst its peers) is authoritative. That is, this cache
 	// contains keys which consistent hash on to this process's
 	// peer number.
-	mainCache cache
+	mainCache cache    // key的hash值处于该服务器的key-value数据
 
 	// hotCache contains keys/values for which this peer is not
 	// authoritative (otherwise they would be in mainCache), but
@@ -159,12 +160,14 @@ type Group struct {
 	// network card could become the bottleneck on a popular key.
 	// This cache is used sparingly to maximize the total number
 	// of key/value pairs that can be stored globally.
-	hotCache cache
+	hotCache cache  // key的hash值不处于该服务器的但是经常通过该服务器转发请求的key-value数据
 
 	// loadGroup ensures that each key is only fetched once
 	// (either locally or remotely), regardless of the number of
 	// concurrent callers.
-	loadGroup flightGroup
+	//比如一个缓存数据失效了，这个时候同时会有很多人调用接口，缓存都没有命中，就会对数据库发起很多次调用，
+	//其实这个时候只要调用一次就行了，其他的都是相同的数据。
+	loadGroup flightGroup  // 在缓存命中失败的时候减少调用,避免同一时刻对同一Key值得重复请求
 
 	_ int32 // force Stats to be 8-byte aligned on 32-bit platforms
 
@@ -210,7 +213,7 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	if dest == nil {
 		return errors.New("groupcache: nil dest Sink")
 	}
-	value, cacheHit := g.lookupCache(key)
+	value, cacheHit := g.lookupCache(key) //在缓存中查看key
 
 	if cacheHit {
 		g.Stats.CacheHits.Add(1)
@@ -222,7 +225,7 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	// (if local) will set this; the losers will not. The common
 	// case will likely be one caller.
 	destPopulated := false
-	value, destPopulated, err := g.load(ctx, key, dest)
+	value, destPopulated, err := g.load(ctx, key, dest)  //如果没有在缓存中找到数据，就从getter方法中load进来
 	if err != nil {
 		return err
 	}
@@ -233,8 +236,10 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 }
 
 // load loads key either by invoking the getter locally or by sending it to another machine.
+// 获取数据，从本地或者其它机器
 func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPopulated bool, err error) {
 	g.Stats.Loads.Add(1)
+	//loadGroup减少对底层的调用，上面已经说了
 	viewi, err := g.loadGroup.Do(key, func() (interface{}, error) {
 		// Check the cache again because singleflight can only dedup calls
 		// that overlap concurrently.  It's possible for 2 concurrent
@@ -264,8 +269,8 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 		g.Stats.LoadsDeduped.Add(1)
 		var value ByteView
 		var err error
-		if peer, ok := g.peers.PickPeer(key); ok {
-			value, err = g.getFromPeer(ctx, peer, key)
+		if peer, ok := g.peers.PickPeer(key); ok {//如果能从远程获取，就从分布式的其他机子获取就从其他机子获取，因为其他机器也是缓存数据比数据库快
+			value, err = g.getFromPeer(ctx, peer, key) //
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)
 				return value, nil
@@ -276,14 +281,14 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 			// probably boring (normal task movement), so not
 			// worth logging I imagine.
 		}
-		value, err = g.getLocally(ctx, key, dest)
+		value, err = g.getLocally(ctx, key, dest)  //调用getter方法，获取数据(从数据库，或者其他地方)
 		if err != nil {
 			g.Stats.LocalLoadErrs.Add(1)
 			return nil, err
 		}
 		g.Stats.LocalLoads.Add(1)
 		destPopulated = true // only one caller of load gets this return value
-		g.populateCache(key, value, &g.mainCache)
+		g.populateCache(key, value, &g.mainCache)   //把数据存放在cache中
 		return value, nil
 	})
 	if err == nil {
@@ -299,14 +304,14 @@ func (g *Group) getLocally(ctx Context, key string, dest Sink) (ByteView, error)
 	}
 	return dest.view()
 }
-
+// 从其它机器获取数据.每一个分布式的服务都需要实现一个Get方法，接口描述文件在proto文件中
 func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView, error) {
 	req := &pb.GetRequest{
 		Group: &g.name,
 		Key:   &key,
 	}
 	res := &pb.GetResponse{}
-	err := peer.Get(ctx, req, res)
+	err := peer.Get(ctx, req, res)  //从远端得到数据
 	if err != nil {
 		return ByteView{}, err
 	}
@@ -314,12 +319,12 @@ func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView
 	// TODO(bradfitz): use res.MinuteQps or something smart to
 	// conditionally populate hotCache.  For now just do it some
 	// percentage of the time.
-	if rand.Intn(10) == 0 {
+	if rand.Intn(10) == 0 {    //哈哈，这里随机放在hotCache中,有意思
 		g.populateCache(key, value, &g.hotCache)
 	}
 	return value, nil
 }
-
+//这个方法比较简单，从是从maincache和hotcache中读取数据
 func (g *Group) lookupCache(key string) (value ByteView, ok bool) {
 	if g.cacheBytes <= 0 {
 		return
@@ -386,9 +391,11 @@ func (g *Group) CacheStats(which CacheType) CacheStats {
 // cache is a wrapper around an *lru.Cache that adds synchronization,
 // makes values always be ByteView, and counts the size of all keys and
 // values.
+//groupcache中的cache主要是加了并发安全，并添加一些统计数据, 一些操作都是直接调用lru.cache.
+//注意这里面的cache和lru中的Cache不一样。
 type cache struct {
 	mu         sync.RWMutex
-	nbytes     int64 // of all keys and values
+	nbytes     int64 //  所有Key和Value的字节数
 	lru        *lru.Cache
 	nhit, nget int64
 	nevict     int64 // number of evictions
@@ -405,12 +412,12 @@ func (c *cache) stats() CacheStats {
 		Evictions: c.nevict,
 	}
 }
-
+// 往cache中添加键值对
 func (c *cache) add(key string, value ByteView) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.lru == nil {
-		c.lru = &lru.Cache{
+		c.lru = &lru.Cache{ // 设置lru中的淘汰函数
 			OnEvicted: func(key lru.Key, value interface{}) {
 				val := value.(ByteView)
 				c.nbytes -= int64(len(key.(string))) + int64(val.Len())

@@ -43,21 +43,22 @@ func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, err
 	if g.m == nil {
 		g.m = make(map[string]*call)
 	}
-	if c, ok := g.m[key]; ok {
+	if c, ok := g.m[key]; ok {  //对于同一个key的调用等待其他goroutine调用完成
 		g.mu.Unlock()
 		c.wg.Wait()
-		return c.val, c.err
+		return c.val, c.err  //直接返回数据
 	}
+	//同个key的调用放在map中
 	c := new(call)
 	c.wg.Add(1)
 	g.m[key] = c
 	g.mu.Unlock()
 
-	c.val, c.err = fn()
+	c.val, c.err = fn() //获取数据
 	c.wg.Done()
 
 	g.mu.Lock()
-	delete(g.m, key)
+	delete(g.m, key) //删除限制
 	g.mu.Unlock()
 
 	return c.val, c.err

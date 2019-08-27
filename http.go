@@ -137,7 +137,7 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 	}
 	return nil, false
 }
-
+// 根据请求的路径获取Group和Key，发送请求并返回结果
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse request.
 	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) {
@@ -180,7 +180,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-type httpGetter struct {
+type httpGetter struct { // 这里实际上实现了Peer模块中的ProtoGetter接口
 	transport func(Context) http.RoundTripper
 	baseURL   string
 }
