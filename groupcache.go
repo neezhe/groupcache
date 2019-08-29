@@ -58,7 +58,7 @@ var (
 	mu     sync.RWMutex
 	groups = make(map[string]*Group)
 
-	initPeerServerOnce sync.Once
+	initPeerServerOnce sync.Once //内部使用原子计数记录被执行的次数，保证只执行一次。无论是否更换once.Do(xx)这里的方法,这个sync.Once块只会执行一次。
 	initPeerServer     func()
 )
 
@@ -91,8 +91,8 @@ func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *G
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	initPeerServerOnce.Do(callInitPeerServer)
-	if _, dup := groups[name]; dup {
+	initPeerServerOnce.Do(callInitPeerServer) //initPeerServerOnce只会被执行一次，无论修饰的是什么函数
+	if _, dup := groups[name]; dup { //组名必须唯一，是个map
 		panic("duplicate registration of group " + name)
 	}
 	g := &Group{
@@ -150,6 +150,7 @@ type Group struct {
 	// (amongst its peers) is authoritative. That is, this cache
 	// contains keys which consistent hash on to this process's
 	// peer number.
+	//单机环境中,只会用到maincache,而不用用到hotcache,因为hotcache是本节点从远程节点获取到的key值对应的cache数据后,保存在本节点上的一个副本.
 	mainCache cache    // key的hash值处于该服务器的key-value数据
 
 	// hotCache contains keys/values for which this peer is not
@@ -208,14 +209,14 @@ func (g *Group) initPeers() {
 }
 
 func (g *Group) Get(ctx Context, key string, dest Sink) error {
-	g.peersOnce.Do(g.initPeers)
+	g.peersOnce.Do(g.initPeers) //初始化Group结构体的对等节点拾取器
 	g.Stats.Gets.Add(1)
 	if dest == nil {
 		return errors.New("groupcache: nil dest Sink")
 	}
-	value, cacheHit := g.lookupCache(key) //在缓存中查看key
+	value, cacheHit := g.lookupCache(key) //在缓存中查看是否有，包括mainCache和hotCache
 
-	if cacheHit {
+	if cacheHit { //是否命中
 		g.Stats.CacheHits.Add(1)
 		return setSinkView(dest, value)
 	}
@@ -225,7 +226,7 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	// (if local) will set this; the losers will not. The common
 	// case will likely be one caller.
 	destPopulated := false
-	value, destPopulated, err := g.load(ctx, key, dest)  //如果没有在缓存中找到数据，就从getter方法中load进来
+	value, destPopulated, err := g.load(ctx, key, dest)  //如果没有在缓存中找到数据，就从getter方法中load进来,就是NewGroup的第三个方法。
 	if err != nil {
 		return err
 	}
@@ -391,11 +392,11 @@ func (g *Group) CacheStats(which CacheType) CacheStats {
 // cache is a wrapper around an *lru.Cache that adds synchronization,
 // makes values always be ByteView, and counts the size of all keys and
 // values.
-//groupcache中的cache主要是加了并发安全，并添加一些统计数据, 一些操作都是直接调用lru.cache.
+//groupcache中的cache主要是加了并发安全，并添加一些统计数据, 一些操作都是直接调用lru.Cache,显然cache由lru.Cache组合而来.
 //注意这里面的cache和lru中的Cache不一样。
 type cache struct {
 	mu         sync.RWMutex
-	nbytes     int64 //  所有Key和Value的字节数
+	nbytes     int64 //所有Key和Value的字节数
 	lru        *lru.Cache
 	nhit, nget int64
 	nevict     int64 // number of evictions

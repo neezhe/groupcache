@@ -39,7 +39,7 @@ type HTTPPool struct {
 	// Context optionally specifies a context for the server to use when it
 	// receives a request.
 	// If nil, the server uses a nil Context.
-	Context func(*http.Request) Context
+	Context func(*http.Request) Context // 可选，为每次的请求封装的Context参数
 
 	// Transport optionally specifies an http.RoundTripper for the client
 	// to use when it makes a request.
@@ -47,7 +47,7 @@ type HTTPPool struct {
 	Transport func(Context) http.RoundTripper
 
 	// this peer's base URL, e.g. "https://example.net:8000"
-	self string
+	self string //self 必须是一个合法的URL指向当前的服务器，比如 "http://10.0.0.1:8000"
 
 	// opts specifies the options.
 	opts HTTPPoolOptions
@@ -61,24 +61,21 @@ type HTTPPool struct {
 type HTTPPoolOptions struct {
 	// BasePath specifies the HTTP path that will serve groupcache requests.
 	// If blank, it defaults to "/_groupcache/".
-	BasePath string
+	BasePath string  // http服务地址前缀，默认为 "/_groupcache/".
 
 	// Replicas specifies the number of key replicas on the consistent hash.
 	// If blank, it defaults to 50.
-	Replicas int
+	Replicas int  // 分布式一致性hash中虚拟节点数量，默认 50.
 
 	// HashFn specifies the hash function of the consistent hash.
 	// If blank, it defaults to crc32.ChecksumIEEE.
-	HashFn consistenthash.Hash
+	HashFn consistenthash.Hash    // 分布式一致性hash的hash算法，默认 crc32.ChecksumIEEE.
 }
 
-// NewHTTPPool initializes an HTTP pool of peers, and registers itself as a PeerPicker.
-// For convenience, it also registers itself as an http.Handler with http.DefaultServeMux.
-// The self argument should be a valid base URL that points to the current server,
-// for example "http://example.net:8000".
-func NewHTTPPool(self string) *HTTPPool {
-	p := NewHTTPPoolOpts(self, nil)
-	http.Handle(p.opts.BasePath, p)
+//初始化一个对等节点的HTTPPool,把自己注册成一个对等节点选取器，也把自己注册成p.opts.BasePath路由的处理器。
+func NewHTTPPool(self string) *HTTPPool {//参数必须为当前服务器的url,如"http://example.net:8000"
+	p := NewHTTPPoolOpts(self, nil) // 初始化HTTPPool，该函数不能重复调用，否则会panic
+	http.Handle(p.opts.BasePath, p) //这个函数默认会注册一个路由p.opts.BasePath，该路由主要用户节点间获取数据的功能
 	return p
 }
 
@@ -88,13 +85,13 @@ var httpPoolMade bool
 // Unlike NewHTTPPool, this function does not register the created pool as an HTTP handler.
 // The returned *HTTPPool implements http.Handler and must be registered using http.Handle.
 func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
-	if httpPoolMade {
+	if httpPoolMade { //只调用一次
 		panic("groupcache: NewHTTPPool must be called only once")
 	}
 	httpPoolMade = true
 
 	p := &HTTPPool{
-		self:        self,
+		self:        self, //使用self参数初始化一个 HTTPPool对象
 		httpGetters: make(map[string]*httpGetter),
 	}
 	if o != nil {
@@ -106,16 +103,16 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	if p.opts.Replicas == 0 {
 		p.opts.Replicas = defaultReplicas
 	}
-	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)
+	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)  // 根据虚拟节点数量和哈希函数创建一致性哈希节点对象
 
-	RegisterPeerPicker(func() PeerPicker { return p })
+	RegisterPeerPicker(func() PeerPicker { return p })  // 注册peers.portPicker
 	return p
 }
 
 // Set updates the pool's list of peers.
 // Each peer value should be a valid base URL,
 // for example "http://example.net:8000".
-func (p *HTTPPool) Set(peers ...string) {
+func (p *HTTPPool) Set(peers ...string) { // 更新节点列表，用了consistenthash
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)
@@ -126,7 +123,7 @@ func (p *HTTPPool) Set(peers ...string) {
 	}
 }
 
-func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
+func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) { // 用一致性hash算法选择一个节点
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.peers.IsEmpty() {
@@ -138,12 +135,13 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 	return nil, false
 }
 // 根据请求的路径获取Group和Key，发送请求并返回结果
-func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+//请求历经类似为https://example.net:8000/_groupcache/groupname/key
+func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) { // 用于处理通过HTTP传递过来的grpc请求
 	// Parse request.
-	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) {
+	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) { // 判断URL前缀是否合法
 		panic("HTTPPool serving unexpected path: " + r.URL.Path)
 	}
-	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 2)
+	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 2) //// 分割URL，并从中提取group和key值，示例请求URL为：https://example.net:8000/_groupcache/groupname/key
 	if len(parts) != 2 {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -152,32 +150,32 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := parts[1]
 
 	// Fetch the value for this group/key.
-	group := GetGroup(groupName)
+	group := GetGroup(groupName)  // 根据url中提取的groupname获取group
 	if group == nil {
 		http.Error(w, "no such group: "+groupName, http.StatusNotFound)
 		return
 	}
 	var ctx Context
-	if p.Context != nil {
+	if p.Context != nil {  // 如Context不为空，说明需要使用定制的context
 		ctx = p.Context(r)
 	}
 
 	group.Stats.ServerRequests.Add(1)
 	var value []byte
-	err := group.Get(ctx, key, AllocatingByteSliceSink(&value))
+	err := group.Get(ctx, key, AllocatingByteSliceSink(&value)) // 获取指定key对应的缓存
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Write the value to the response body as a proto message.
-	body, err := proto.Marshal(&pb.GetResponse{Value: value})
+	body, err := proto.Marshal(&pb.GetResponse{Value: value}) //序列化响应内容
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-protobuf")
-	w.Write(body)
+	w.Header().Set("Content-Type", "application/x-protobuf") // 设置http头
+	w.Write(body) //设置http  body
 }
 
 type httpGetter struct { // 这里实际上实现了Peer模块中的ProtoGetter接口
@@ -189,22 +187,22 @@ var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
 
-func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse) error {
-	u := fmt.Sprintf(
+func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse) error { //该方法根据需要向对等节点查询缓存
+	u := fmt.Sprintf(  // 生成请求url
 		"%v%v/%v",
 		h.baseURL,
 		url.QueryEscape(in.GetGroup()),
 		url.QueryEscape(in.GetKey()),
 	)
-	req, err := http.NewRequest("GET", u, nil)
+	req, err := http.NewRequest("GET", u, nil)  // 新建Get请求
 	if err != nil {
 		return err
 	}
-	tr := http.DefaultTransport
+	tr := http.DefaultTransport //获取transport方法
 	if h.transport != nil {
 		tr = h.transport(context)
 	}
-	res, err := tr.RoundTrip(req)
+	res, err := tr.RoundTrip(req) // 执行请求
 	if err != nil {
 		return err
 	}
@@ -212,14 +210,14 @@ func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned: %v", res.Status)
 	}
-	b := bufferPool.Get().(*bytes.Buffer)
-	b.Reset()
+	b := bufferPool.Get().(*bytes.Buffer) // 这里用到了go 提供的 sync.Pool，对字节缓冲数组进行复用，避免了反复申请（缓存期为两次gc之间）
+	b.Reset() //字节缓冲重置
 	defer bufferPool.Put(b)
-	_, err = io.Copy(b, res.Body)
+	_, err = io.Copy(b, res.Body)  //字节缓冲填充
 	if err != nil {
 		return fmt.Errorf("reading response body: %v", err)
 	}
-	err = proto.Unmarshal(b.Bytes(), out)
+	err = proto.Unmarshal(b.Bytes(), out) //反序列化字节数组
 	if err != nil {
 		return fmt.Errorf("decoding response body: %v", err)
 	}

@@ -47,7 +47,7 @@ type NoPeers struct{}
 func (NoPeers) PickPeer(key string) (peer ProtoGetter, ok bool) { return }
 
 var (
-	portPicker func(groupName string) PeerPicker
+	portPicker func(groupName string) PeerPicker //函数，根据group名拿到对等节点拾取器，其实拿到的就是NewHTTPPool创建的那个HTTPPool结构体
 )
 
 // RegisterPeerPicker registers the peer initialization function.
@@ -55,7 +55,7 @@ var (
 // Either RegisterPeerPicker or RegisterPerGroupPeerPicker should be
 // called exactly once, but not both.
 func RegisterPeerPicker(fn func() PeerPicker) {
-	if portPicker != nil {
+	if portPicker != nil { //这个变量是这个包中全局的，只被初始化一次
 		panic("RegisterPeerPicker called more than once")
 	}
 	portPicker = func(_ string) PeerPicker { return fn() }
@@ -77,7 +77,7 @@ func getPeers(groupName string) PeerPicker {
 	if portPicker == nil {
 		return NoPeers{}
 	}
-	pk := portPicker(groupName)
+	pk := portPicker(groupName) //根据group名拿到对等节点拾取器
 	if pk == nil {
 		pk = NoPeers{}
 	}

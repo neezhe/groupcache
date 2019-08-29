@@ -23,23 +23,29 @@ import (
 	"strconv"
 )
 
-type Hash func(data []byte) uint32
+//此中代码为在groupcache里用到一致性哈希的地方，就是多节点部署时，要把多个节点地址用一致性哈希管理起来，
+// 从而让缓存数据能够均匀分散，降低单台服务器的压力。
+//但是这里实现的一致性哈希还比较粗糙，没有实现动态删除节点，还不支持节点宕机后自动数据迁移，
+// 这两个功能是一致性哈希的另一大精髓。（感兴趣的可参考我之前的文章）
+
+type Hash func(data []byte) uint32 // Hash就是一个返回unit32的哈希方法
 //Map结构中replicas的含义是增加虚拟桶，使数据分布更加均匀
+// Map就是一致性哈希的高级封装
 type Map struct {
-	hash     Hash
-	replicas int
-	keys     []int // Sorted
-	hashMap  map[int]string
+	hash     Hash // 哈希算法
+	replicas int // replica参数，表明了一份数据要冗余存储多少份,就是说多少个虚拟节点
+	keys     []int // 存储hash值，按hash值升序排列（模拟一致性哈希环空间）
+	hashMap  map[int]string // 记录hash值 -> 节点ip地址的映射关系
 }
-// 创建Map结构
+// 一致性哈希的工厂方法
 func New(replicas int, fn Hash) *Map {
 	m := &Map{
 		replicas: replicas,
-		hash:     fn,
+		hash:     fn, //传入的哈希函数
 		hashMap:  make(map[int]string),
 	}
 	if m.hash == nil {
-		m.hash = crc32.ChecksumIEEE
+		m.hash = crc32.ChecksumIEEE //nsq中也用到了这玩意，表示不指定自定义Hash方法的话，默认用ChecksumIEEE
 	}
 	return m
 }
@@ -50,34 +56,36 @@ func (m *Map) IsEmpty() bool {
 }
 
 // Adds some keys to the hash.
-// 添加新的Key
+// 添加新的Key，参数一般就是多个节点的ip地址（或者节点id）
 func (m *Map) Add(keys ...string) {
 	for _, key := range keys {
-		for i := 0; i < m.replicas; i++ {
-			hash := int(m.hash([]byte(strconv.Itoa(i) + key)))
+		for i := 0; i < m.replicas; i++ { // 每一个key都会冗余多份（每份冗余就是一致性哈希里的虚拟节点 v-node）
+			hash := int(m.hash([]byte(strconv.Itoa(i) + key))) //虚拟节点的key的哈希值
 			m.keys = append(m.keys, hash)
 			m.hashMap[hash] = key
 		}
 	}
-	sort.Ints(m.keys)
+	sort.Ints(m.keys)//一致性哈希要求哈希环是升序的，执行一次排序操作
 }
 
 // Gets the closest item in the hash to the provided key.
-// 根据hash(key)获取value
+// 根据hash(key)获取value，找到该key应该存于哪个节点，返回该节点的地址
 func (m *Map) Get(key string) string {
 	if m.IsEmpty() {
 		return ""
 	}
-
+	// 1. 算出key的hash值
+	// 2. 二分查找大于等于该key的第一个hash值的下标（哈希环是升序有序的，所以可以二分查找）
 	hash := int(m.hash([]byte(key)))
 
 	// Binary search for appropriate replica.
-	idx := sort.Search(len(m.keys), func(i int) bool { return m.keys[i] >= hash })
+	//Search 常用于在一个已排序的，可索引的数据结构中寻找索引为 i 的值 x，例如数组或切片。
+	idx := sort.Search(len(m.keys), func(i int) bool { return m.keys[i] >= hash })//内部实现二分查找，查找条件由第二个参数指定，返回查找到的索引
 
 	// Means we have cycled back to the first replica.
-	if idx == len(m.keys) {
-		idx = 0
+	if idx == len(m.keys) {//在切片中无法找到使第二个参数为true的i时，sort.Search的返回值为Search的第一个参数
+		idx = 0 //下标越界，循环找到到0号下标
 	}
 
-	return m.hashMap[m.keys[idx]]
+	return m.hashMap[m.keys[idx]] // 通过hash值，得到节点地址
 }
