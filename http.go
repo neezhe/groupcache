@@ -103,7 +103,7 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	if p.opts.Replicas == 0 {
 		p.opts.Replicas = defaultReplicas
 	}
-	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)  // 根据虚拟节点数量和哈希函数创建一致性哈希节点对象
+	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)  // 根据虚拟节点数量和哈希函数创建一致性哈希节点对象,但是此处并没有创建key或者hashmap，本机节点默认这两个值是0
 
 	RegisterPeerPicker(func() PeerPicker { return p })  // 注册peers.portPicker
 	return p
@@ -129,7 +129,7 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) { // 用一致性has
 	if p.peers.IsEmpty() {
 		return nil, false
 	}
-	if peer := p.peers.Get(key); peer != p.self {
+	if peer := p.peers.Get(key); peer != p.self { //
 		return p.httpGetters[peer], true
 	}
 	return nil, false

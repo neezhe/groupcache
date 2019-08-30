@@ -39,7 +39,7 @@ func main() {
 	// 路由
 	http.HandleFunc("/thumbnails/", func(rw http.ResponseWriter, r *http.Request) {
 		var data []byte
-		thumbNails.Get(nil, r.URL.Path[len("/thumbnails/"):], groupcache.AllocatingByteSliceSink(&data))
+		thumbNails.Get(nil, r.URL.Path[len("/thumbnails/"):], groupcache.AllocatingByteSliceSink(&data))//第二个参数就是文件名
 		rw.Write([]byte(data))
 	})
 	// 启动服务器

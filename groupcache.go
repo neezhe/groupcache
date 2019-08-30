@@ -98,7 +98,7 @@ func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *G
 	g := &Group{
 		name:       name,
 		getter:     getter,
-		peers:      peers,
+		peers:      peers, //nil
 		cacheBytes: cacheBytes,
 		loadGroup:  &singleflight.Group{},
 	}
@@ -270,7 +270,7 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 		g.Stats.LoadsDeduped.Add(1)
 		var value ByteView
 		var err error
-		if peer, ok := g.peers.PickPeer(key); ok {//如果能从远程获取，就从分布式的其他机子获取就从其他机子获取，因为其他机器也是缓存数据比数据库快
+		if peer, ok := g.peers.PickPeer(key); ok {//如果能从远程获取，就从分布式的其他机子获取，因为其他机器也是缓存数据比数据库快
 			value, err = g.getFromPeer(ctx, peer, key) //
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)

@@ -31,7 +31,7 @@ type call struct { // call等价于一条被真正执行的对某个key的查询
 // units of work can be executed with duplicate suppression.
 type Group struct { // Group相当于一个管理每个key的call请求的对象
 	mu sync.Mutex       // 并发情况下，保证m这个普通map不会有并发安全问题
-	m  map[string]*call // key为数据的key，value为一条call命令，记录下某个key当前时刻有没有客户端在查询
+	m  map[string]*call // key为数据的key(非hash的)，value为一条call命令，记录下某个key当前时刻有没有客户端在查询
 }
 
 // Do executes and returns the results of the given function, making

@@ -29,20 +29,20 @@ import (
 // 这两个功能是一致性哈希的另一大精髓。（感兴趣的可参考我之前的文章）
 
 type Hash func(data []byte) uint32 // Hash就是一个返回unit32的哈希方法
-//Map结构中replicas的含义是增加虚拟桶，使数据分布更加均匀
+//Map结构中replicas的含义是增加虚拟节点，使数据分布更加均匀
 // Map就是一致性哈希的高级封装
 type Map struct {
-	hash     Hash // 哈希算法
+	hash     Hash // 哈希函数
 	replicas int // replica参数，表明了一份数据要冗余存储多少份,就是说多少个虚拟节点
-	keys     []int // 存储hash值，按hash值升序排列（模拟一致性哈希环空间）
-	hashMap  map[int]string // 记录hash值 -> 节点ip地址的映射关系
+	keys     []int // 存储key的hash值（包括虚拟节点的），按hash值升序排列（模拟一致性哈希环空间）
+	hashMap  map[int]string // 记录key的hash值（由于有多个虚拟节点，所以这个有多个） ->key的真实值（比如节点ip地址），所以可能“010.1.10.3”和“110.1.10.3”和“210.1.10.3”的哈希值对应的原始key为“10.1.10.3”，
 }
 // 一致性哈希的工厂方法
 func New(replicas int, fn Hash) *Map {
 	m := &Map{
 		replicas: replicas,
 		hash:     fn, //传入的哈希函数
-		hashMap:  make(map[int]string),
+		hashMap:  make(map[int]string), //map在用之前必须先初始化
 	}
 	if m.hash == nil {
 		m.hash = crc32.ChecksumIEEE //nsq中也用到了这玩意，表示不指定自定义Hash方法的话，默认用ChecksumIEEE
@@ -70,7 +70,7 @@ func (m *Map) Add(keys ...string) {
 
 // Gets the closest item in the hash to the provided key.
 // 根据hash(key)获取value，找到该key应该存于哪个节点，返回该节点的地址
-func (m *Map) Get(key string) string {
+func (m *Map) Get(key string) string { //这个key是啥玩意?可能是要根据图片名来拿到存储在哪台服务器上的地址。
 	if m.IsEmpty() {
 		return ""
 	}
