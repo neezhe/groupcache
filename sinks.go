@@ -214,12 +214,13 @@ func (s *protoSink) SetProto(m proto.Message) error { //【将m写入protoSink�
 // AllocatingByteSliceSink returns a Sink that allocates
 // a byte slice to hold the received value and assigns
 // it to *dst. The memory is not retained by groupcache.
-func AllocatingByteSliceSink(dst *[]byte) Sink { //【分配一个字节切片来保存接收到的数据】
-	return &allocBytesSink{dst: dst}
+
+func AllocatingByteSliceSink(dst *[]byte) Sink { //【分配一个字节切片来保存接收到的数据】,实例化私有结构体，5个都是私有的stringSink，	byteViewSink...
+	return &allocBytesSink{dst: dst} //尼玛，dst就是用来装返回数据的。
 }
 
 type allocBytesSink struct { //【有一个字节切片指针类型的属性dst】
-	dst *[]byte
+	dst *[]byte //
 	v   ByteView
 }
 
@@ -253,8 +254,9 @@ func (s *allocBytesSink) setBytesOwned(b []byte) error { //【使用b设置alloc
 	if s.dst == nil {
 		return errors.New("nil AllocatingByteSliceSink *[]byte dst")
 	}
+	//把最终的结果交给s.dst
 	*s.dst = cloneBytes(b) // another copy, protecting the read-only s.v.b view
-	s.v.b = b
+	s.v.b = b //切片赋值是引用。
 	s.v.s = ""
 	return nil
 }

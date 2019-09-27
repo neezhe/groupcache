@@ -74,8 +74,8 @@ type HTTPPoolOptions struct {
 
 //初始化一个对等节点的HTTPPool,把自己注册成一个对等节点选取器，也把自己注册成p.opts.BasePath路由的处理器。
 func NewHTTPPool(self string) *HTTPPool {//参数必须为当前服务器的url,如"http://example.net:8000"
-	p := NewHTTPPoolOpts(self, nil) // 初始化HTTPPool，该函数不能重复调用，否则会panic
-	http.Handle(p.opts.BasePath, p) //这个函数默认会注册一个路由p.opts.BasePath，该路由主要用户节点间获取数据的功能
+	p := NewHTTPPoolOpts(self, nil) // 初始化HTTPPool，该函数不能重复调用，否则会panic，HTTPPool也是一个http处理器
+	http.Handle(p.opts.BasePath, p) //这个函数默认会注册一个路由p.opts.BasePath，该路由主要用户节点间获取数据的功能."/_groupcache/"
 	return p
 }
 
@@ -91,7 +91,7 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	httpPoolMade = true
 
 	p := &HTTPPool{
-		self:        self, //使用self参数初始化一个 HTTPPool对象
+		self:        self, //使用self参数（基础节点的url）初始化一个 HTTPPool对象
 		httpGetters: make(map[string]*httpGetter),
 	}
 	if o != nil {
@@ -101,7 +101,7 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 		p.opts.BasePath = defaultBasePath
 	}
 	if p.opts.Replicas == 0 {
-		p.opts.Replicas = defaultReplicas
+		p.opts.Replicas = defaultReplicas //默认复制节点的个数
 	}
 	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)  // 根据虚拟节点数量和哈希函数创建一致性哈希节点对象,但是此处并没有创建key或者hashmap，本机节点默认这两个值是0
 
@@ -119,11 +119,11 @@ func (p *HTTPPool) Set(peers ...string) { // 更新节点列表，用了consiste
 	p.peers.Add(peers...)
 	p.httpGetters = make(map[string]*httpGetter, len(peers))
 	for _, peer := range peers {
-		p.httpGetters[peer] = &httpGetter{transport: p.Transport, baseURL: peer + p.opts.BasePath}
+		p.httpGetters[peer] = &httpGetter{transport: p.Transport, baseURL: peer + p.opts.BasePath} //baseURL就类似为http://127.0.0.1:8081/_groupcache/
 	}
 }
 
-func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) { // 用一致性hash算法选择一个节点
+func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) { // 用一致性hash算法选择一个节点，拿服务器节点的。
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.peers.IsEmpty() {
@@ -186,7 +186,11 @@ type httpGetter struct { // 这里实际上实现了Peer模块中的ProtoGetter�
 var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
-
+//第二个参数是
+// req := &pb.GetRequest{
+//		Group: &g.name,
+//		Key:   &key,
+//	}
 func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse) error { //该方法根据需要向对等节点查询缓存
 	u := fmt.Sprintf(  // 生成请求url
 		"%v%v/%v",

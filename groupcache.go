@@ -91,7 +91,7 @@ func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *G
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	initPeerServerOnce.Do(callInitPeerServer) //initPeerServerOnce只会被执行一次，无论修饰的是什么函数
+	initPeerServerOnce.Do(callInitPeerServer) //initPeerServerOnce只会被执行一次，无论修饰的是什么函数。callInitPeerServer是group创建的时候要调用的钩子函数
 	if _, dup := groups[name]; dup { //组名必须唯一，是个map
 		panic("duplicate registration of group " + name)
 	}
@@ -207,14 +207,14 @@ func (g *Group) initPeers() {
 		g.peers = getPeers(g.name)
 	}
 }
-
+//sink就是洗涤池，这表示这个东西可以存放各种类型的cache值。总共有5个池子：allocateByteSink,byteViewSink...
 func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	g.peersOnce.Do(g.initPeers) //初始化Group结构体的对等节点拾取器
 	g.Stats.Gets.Add(1)
 	if dest == nil {
 		return errors.New("groupcache: nil dest Sink")
 	}
-	value, cacheHit := g.lookupCache(key) //在缓存中查看是否有，包括mainCache和hotCache
+	value, cacheHit := g.lookupCache(key) //在缓存中查看是否有，包括mainCache和hotCache.第一次肯定是找不到的,第一次必须从磁盘拿到。
 
 	if cacheHit { //是否命中
 		g.Stats.CacheHits.Add(1)
@@ -241,6 +241,8 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPopulated bool, err error) {
 	g.Stats.Loads.Add(1)
 	//loadGroup减少对底层的调用，上面已经说了
+	//哈哈，调用的是singleflight.Group的Do方法，不是orderFlightGroup的。注意groupcache中的Group和singleflight中的Group不一样。
+	//这个loadGroup在前面创建Group的时候只是初始化为0值
 	viewi, err := g.loadGroup.Do(key, func() (interface{}, error) {
 		// Check the cache again because singleflight can only dedup calls
 		// that overlap concurrently.  It's possible for 2 concurrent
@@ -270,8 +272,8 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 		g.Stats.LoadsDeduped.Add(1)
 		var value ByteView
 		var err error
-		if peer, ok := g.peers.PickPeer(key); ok {//如果能从远程获取，就从分布式的其他机子获取，因为其他机器也是缓存数据比数据库快
-			value, err = g.getFromPeer(ctx, peer, key) //
+		if peer, ok := g.peers.PickPeer(key); ok {//如果能从远程获取，就从分布式的其他机子获取，因为其他机器也是缓存数据比数据库快.其实就是HTTPPool的PickPeer函数。
+			value, err = g.getFromPeer(ctx, peer, key) //第二个参数是httpGetter类型
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)
 				return value, nil
@@ -330,6 +332,7 @@ func (g *Group) lookupCache(key string) (value ByteView, ok bool) {
 	if g.cacheBytes <= 0 {
 		return
 	}
+	//语法：没有显式初始化的结构体变量都会自动初始化为相应类型的零值，下面mainCache，虽然在前面没有被显式初始化，但是是可以调用get方法的。
 	value, ok = g.mainCache.get(key)
 	if ok {
 		return

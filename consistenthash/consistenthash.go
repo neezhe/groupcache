@@ -61,7 +61,7 @@ func (m *Map) Add(keys ...string) {
 	for _, key := range keys {
 		for i := 0; i < m.replicas; i++ { // 每一个key都会冗余多份（每份冗余就是一致性哈希里的虚拟节点 v-node）
 			hash := int(m.hash([]byte(strconv.Itoa(i) + key))) //虚拟节点的key的哈希值
-			m.keys = append(m.keys, hash)
+			m.keys = append(m.keys, hash) //若有3个节点，最终m.keys就有了3乘以m.replicas个元素
 			m.hashMap[hash] = key
 		}
 	}
