@@ -140,18 +140,17 @@ func callInitPeerServer() {
 // a group of 1 or more machines.
 type Group struct {
 	name       string //group的名字，必须唯一
-	getter     Getter   //getter方法，用于从缓存失效后从数据库或其他地方获取数据.// 获取value的wrapper
+	getter     Getter   //getter方法，用于从缓存中没找到则从数据库或其他地方获取数据.
 	//分布式支持
 	peersOnce  sync.Once
-	peers      PeerPicker // 用于获取peer
+	peers      PeerPicker // 用于获取peer，节点调度器
 	cacheBytes int64 // mainCache和hotCache的总大小限制
 
 	// mainCache is a cache of the keys for which this process
 	// (amongst its peers) is authoritative. That is, this cache
 	// contains keys which consistent hash on to this process's
 	// peer number.
-	//单机环境中,只会用到maincache,而不用用到hotcache,因为hotcache是本节点从远程节点获取到的key值对应的cache数据后,保存在本节点上的一个副本.
-	mainCache cache    // key的hash值处于该服务器的key-value数据
+	mainCache cache    // 此节点的缓存
 
 	// hotCache contains keys/values for which this peer is not
 	// authoritative (otherwise they would be in mainCache), but
@@ -161,14 +160,14 @@ type Group struct {
 	// network card could become the bottleneck on a popular key.
 	// This cache is used sparingly to maximize the total number
 	// of key/value pairs that can be stored globally.
-	hotCache cache  // key的hash值不处于该服务器的但是经常通过该服务器转发请求的key-value数据
+	hotCache cache  // 其他节点的缓存
 
 	// loadGroup ensures that each key is only fetched once
 	// (either locally or remotely), regardless of the number of
 	// concurrent callers.
 	//比如一个缓存数据失效了，这个时候同时会有很多人调用接口，缓存都没有命中，就会对数据库发起很多次调用，
 	//其实这个时候只要调用一次就行了，其他的都是相同的数据。
-	loadGroup flightGroup  // 在缓存命中失败的时候减少调用,避免同一时刻对同一Key值得重复请求
+	loadGroup flightGroup  // 在缓存命中失败的时候减少调用,避免同一时刻对同一Key值得重复请求，请求并发控制器
 
 	_ int32 // force Stats to be 8-byte aligned on 32-bit platforms
 
@@ -204,7 +203,7 @@ func (g *Group) Name() string {
 
 func (g *Group) initPeers() {
 	if g.peers == nil {
-		g.peers = getPeers(g.name)
+		g.peers = getPeers(g.name) //拿到HTTPPool
 	}
 }
 //sink就是洗涤池，这表示这个东西可以存放各种类型的cache值。总共有5个池子：allocateByteSink,byteViewSink...
@@ -230,7 +229,7 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	if err != nil {
 		return err
 	}
-	if destPopulated {
+	if destPopulated { //若dest已经被填充
 		return nil
 	}
 	return setSinkView(dest, value)

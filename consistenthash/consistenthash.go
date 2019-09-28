@@ -43,7 +43,7 @@ func New(replicas int, fn Hash) *Map {
 		replicas: replicas,
 		hash:     fn, //传入的哈希函数
 		hashMap:  make(map[int]string), //map在用之前必须先初始化
-	}
+	} //m.keys和m.hashMap[hash]在下面Add中被填充
 	if m.hash == nil {
 		m.hash = crc32.ChecksumIEEE //nsq中也用到了这玩意，表示不指定自定义Hash方法的话，默认用ChecksumIEEE
 	}
