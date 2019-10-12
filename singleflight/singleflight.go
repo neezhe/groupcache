@@ -38,9 +38,8 @@ type Group struct { // Group相当于一个管理每个key的call请求的对象
 // sure that only one execution is in-flight for a given key at a
 // time. If a duplicate comes in, the duplicate caller waits for the
 // original to complete and receives the same results.
-// Do里面是查询命令执行的逻辑。
-// 当客户端想查询某个key对应的值时会调用Do方法来执行查询。
-// 参数传入一个待查询的key，还有一个对应的查询方法，返回key对应的value值
+
+// 当客户端想查询某个key对应的值时会调用Do方法来执行查询。参数传入一个待查询的key，还有一个对应的查询方法，返回key对应的value值
 func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, error) {
 	g.mu.Lock() // 为了保证普通map的并发安全，要先上锁
 	if g.m == nil { // 检查map有无初始化
@@ -57,7 +56,7 @@ func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, err
 	// 当前时刻第一个想要查询该key的人，就插入一条key -> call记录
 	// 注意，此时的map仍然是上锁状态，因为还要对map进行插入，有并发安全问题
 	c := new(call)
-	c.wg.Add(1)
+	c.wg.Add(1) //支持只有一个goroutine去执行fn，因为在52行有个c.wg.Wait()
 	g.m[key] = c
 	g.mu.Unlock()
 	// 执行作为参数传入的查询方法
