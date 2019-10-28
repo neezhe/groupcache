@@ -30,16 +30,16 @@ type Cache struct { // LRU的高层封装（非并发安全！）
 
 	// OnEvicted optionally specifies a callback function to be
 	// executed when an entry is purged from the cache.
-	OnEvicted func(key Key, value interface{})  // 数据项被淘汰时，调用的函数，也就是回调函数，当一个entry被移除后回调
+	OnEvicted func(key Key, value interface{})  // 数据项被淘汰时，回调函数，当一个entry被移除后回调
 	//下面用了一个map来做查找，用ll来做lru刷新
-	ll    *list.List //LRU链表。维护数据的访问次序
-	cache map[interface{}]*list.Element // 记录Key -> entry的映射关系，O(1)时间得到entry。所有我们需要根据key拿到的值就存在这个里面。
+	ll    *list.List //LRU双向链表。维护数据的访问次序.这个是标准库。
+	cache map[interface{}]*list.Element //Element是标准库中代表双链表的元素// 记录Key -> entry的映射关系（Element中的value存的是entry,），O(1)时间得到entry。所有我们需要根据key拿到的值就存在这个里面。
 }
 
 // A Key may be any value that is comparable. See http://golang.org/ref/spec#Comparison_operators
 type Key interface{} //Key是任意可比较（Comparable）类型
 
-type entry struct { // entry是一个K-V对，value也是任意类型（不必Comparable）
+type entry struct { // 一个 entry 包含一个 key 和一个 value，都是任意类型
 	key   Key
 	value interface{}
 }
@@ -49,24 +49,23 @@ type entry struct { // entry是一个K-V对，value也是任意类型（不必Co
 // that eviction is done by the caller.
 func New(maxEntries int) *Cache {
 	return &Cache{
-		MaxEntries: maxEntries,
-		ll:         list.New(),
+		MaxEntries: maxEntries,  //若maxEntries为0则表示缓存没有大小限制
+		ll:         list.New(),  //list是这个双向链表的头，Element是链表中的节点.
 		cache:      make(map[interface{}]*list.Element),
 	}
 }
-// 基本操作Add,Get,Remove,removeElement，在访问数据时，更新相应的访问次序或者删除数据项
 // Add方法，插入一个K-V对
 func (c *Cache) Add(key Key, value interface{}) {
-	if c.cache == nil {
+	if c.cache == nil { //若事先没有根据maxEntries来New一个Cache,那么此处就初始化一个大小没有限制的Cache（即MaxEntries为0的情况）
 		c.cache = make(map[interface{}]*list.Element)
-		c.ll = list.New()
+		c.ll = list.New()  //标准库中的新建
 	}
 	if ee, ok := c.cache[key]; ok { // 如果该key已存在，更新entry里的value值，并将entry挪到链表头部
-		c.ll.MoveToFront(ee)
-		ee.Value.(*entry).value = value
+		c.ll.MoveToFront(ee) //把这个节点移到头部
+		ee.Value.(*entry).value = value //修改这个节点的值
 		return
 	}
-	ele := c.ll.PushFront(&entry{key, value}) // 如果该key不存在，新建一个entry，插到链表头部
+	ele := c.ll.PushFront(&entry{key, value}) // 如果该key不存在，新建一个entry，插到链表头部，插入的数据结构为entry，存到element,然后放到链表前面
 	c.cache[key] = ele
 	if c.MaxEntries != 0 && c.ll.Len() > c.MaxEntries { // 如果超出链表允许长度，移除链表尾部的数据
 		c.RemoveOldest()
@@ -96,7 +95,7 @@ func (c *Cache) Remove(key Key) {
 }
 
 // RemoveOldest removes the oldest item from the cache.
-func (c *Cache) RemoveOldest() {
+func (c *Cache) RemoveOldest() {  //删除最老的这个元素
 	if c.cache == nil {
 		return
 	}
