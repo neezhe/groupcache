@@ -6,10 +6,10 @@ package main
 
 import (
 	"fmt"
+	"groupcache"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"github.com/golang/groupcache"
-	"io/ioutil"
 )
 
 func generateThumbnail(fileName string) []byte {
@@ -40,7 +40,7 @@ func main() {
 	http.HandleFunc("/thumbnails/", func(rw http.ResponseWriter, r *http.Request) {
 		var data []byte
 		//注意下面这个Get方法，远端节点来访问时，在ServerHTTP中调用的就是这个Get方法。
-		thumbNails.Get(nil, r.URL.Path[len("/thumbnails/"):], groupcache.AllocatingByteSliceSink(&data))//第二个参数就是文件名
+		thumbNails.Get(nil, r.URL.Path[len("/thumbnails/"):], groupcache.AllocatingByteSliceSink(&data)) //第二个参数就是文件名
 		rw.Write([]byte(data))
 	})
 	// 启动服务器
