@@ -19,7 +19,7 @@ limitations under the License.
 package groupcache
 
 import (
-	pb "github.com/golang/groupcache/groupcachepb"
+	pb "groupcache/groupcachepb"
 )
 
 // Context is an opaque value passed through calls to the
@@ -66,6 +66,7 @@ func RegisterPeerPicker(fn func() PeerPicker) {
 	if portPicker != nil { //这个变量是这个包中全局的，只被初始化一次
 		panic("RegisterPeerPicker called more than once")
 	}
+	//注意此处的fn带括号了，表面这个函数是会运算的，而不是fn的指针
 	portPicker = func(_ string) PeerPicker { return fn() } //这样的话,输入参数是什么就不会起作用。也就是说无论输入什么都会拿到这个PeerPicker
 }
 

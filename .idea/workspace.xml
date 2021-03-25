@@ -309,7 +309,7 @@
       <go_parameters value="-i" />
       <kind value="FILE" />
       <filePath value="$PROJECT_DIR$/main/main.go" />
-      <package value="github.com/golang/groupcache" />
+      <package value="groupcache" />
       <directory value="$PROJECT_DIR$/" />
       <method v="2" />
     </configuration>

@@ -31,9 +31,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	pb "github.com/golang/groupcache/groupcachepb"
-	"github.com/golang/groupcache/lru"
-	"github.com/golang/groupcache/singleflight"
+	pb "groupcache/groupcachepb"
+	"groupcache/lru"
+	"groupcache/singleflight"
 )
 
 // A Getter loads data for a key.
@@ -92,7 +92,7 @@ func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *G
 	mu.Lock()
 	defer mu.Unlock()
 	initPeerServerOnce.Do(callInitPeerServer) //initPeerServerOnce只会被执行一次，无论修饰的是什么函数。callInitPeerServer是group创建的时候要调用的钩子函数
-	if _, dup := groups[name]; dup { //组名必须唯一，是个map
+	if _, dup := groups[name]; dup {          //组名必须唯一，是个map
 		panic("duplicate registration of group " + name)
 	}
 	g := &Group{
@@ -139,18 +139,18 @@ func callInitPeerServer() {
 // A Group is a cache namespace and associated data loaded spread over
 // a group of 1 or more machines.
 type Group struct {
-	name       string //group的名字，必须唯一
-	getter     Getter   //getter方法，用于从缓存中没找到则从数据库或其他地方获取数据.
+	name   string //group的名字，必须唯一
+	getter Getter //getter方法，用于从缓存中没找到则从数据库或其他地方获取数据.
 	//分布式支持
 	peersOnce  sync.Once
 	peers      PeerPicker // 用于获取peer，节点调度器
-	cacheBytes int64 // mainCache和hotCache的总大小限制
+	cacheBytes int64      // mainCache和hotCache的总大小限制
 
 	// mainCache is a cache of the keys for which this process
 	// (amongst its peers) is authoritative. That is, this cache
 	// contains keys which consistent hash on to this process's
 	// peer number.
-	mainCache cache    // 此节点的缓存
+	mainCache cache // 此节点的缓存
 
 	// hotCache contains keys/values for which this peer is not
 	// authoritative (otherwise they would be in mainCache), but
@@ -160,14 +160,14 @@ type Group struct {
 	// network card could become the bottleneck on a popular key.
 	// This cache is used sparingly to maximize the total number
 	// of key/value pairs that can be stored globally.
-	hotCache cache  // 其他节点的缓存
+	hotCache cache // 其他节点的缓存
 
 	// loadGroup ensures that each key is only fetched once
 	// (either locally or remotely), regardless of the number of
 	// concurrent callers.
 	//比如一个缓存数据失效了，这个时候同时会有很多人调用接口，缓存都没有命中，就会对数据库发起很多次调用，
 	//其实这个时候只要调用一次就行了，其他的都是相同的数据。
-	loadGroup flightGroup  // 在缓存命中失败的时候减少调用,避免同一时刻对同一Key值得重复请求，请求并发控制器
+	loadGroup flightGroup // 在缓存命中失败的时候减少调用,避免同一时刻对同一Key值得重复请求，请求并发控制器
 
 	_ int32 // force Stats to be 8-byte aligned on 32-bit platforms
 
@@ -206,6 +206,7 @@ func (g *Group) initPeers() {
 		g.peers = getPeers(g.name) //拿到HTTPPool
 	}
 }
+
 //sink就是洗涤池，这表示这个东西可以存放各种类型的cache值。总共有5个池子：allocateByteSink,byteViewSink...
 func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	g.peersOnce.Do(g.initPeers) //初始化Group结构体的对等节点拾取器
@@ -225,7 +226,7 @@ func (g *Group) Get(ctx Context, key string, dest Sink) error {
 	// (if local) will set this; the losers will not. The common
 	// case will likely be one caller.
 	destPopulated := false
-	value, destPopulated, err := g.load(ctx, key, dest)  //如果没有在缓存中找到数据，就从getter方法中load进来,就是NewGroup的第三个方法。
+	value, destPopulated, err := g.load(ctx, key, dest) //如果没有在缓存中找到数据，就从getter方法中load进来,就是NewGroup的第三个方法。
 	if err != nil {
 		return err
 	}
@@ -271,7 +272,7 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 		g.Stats.LoadsDeduped.Add(1)
 		var value ByteView
 		var err error
-		if peer, ok := g.peers.PickPeer(key); ok {//如果能从远程获取，就从分布式的其他机子获取，因为其他机器也是缓存数据比数据库快.其实就是HTTPPool的PickPeer函数。
+		if peer, ok := g.peers.PickPeer(key); ok { //如果能从远程获取，就从分布式的其他机子获取，因为其他机器也是缓存数据比数据库快.其实就是HTTPPool的PickPeer函数。
 			value, err = g.getFromPeer(ctx, peer, key) //第二个参数是httpGetter类型
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)
@@ -283,14 +284,14 @@ func (g *Group) load(ctx Context, key string, dest Sink) (value ByteView, destPo
 			// probably boring (normal task movement), so not
 			// worth logging I imagine.
 		}
-		value, err = g.getLocally(ctx, key, dest)  //调用getter方法，获取数据(从数据库，或者其他地方)
+		value, err = g.getLocally(ctx, key, dest) //调用getter方法，获取数据(从数据库，或者其他地方)
 		if err != nil {
 			g.Stats.LocalLoadErrs.Add(1)
 			return nil, err
 		}
 		g.Stats.LocalLoads.Add(1)
-		destPopulated = true // only one caller of load gets this return value
-		g.populateCache(key, value, &g.mainCache)   //把数据存放在cache中
+		destPopulated = true                      // only one caller of load gets this return value
+		g.populateCache(key, value, &g.mainCache) //把数据存放在cache中
 		return value, nil
 	})
 	if err == nil {
@@ -306,6 +307,7 @@ func (g *Group) getLocally(ctx Context, key string, dest Sink) (ByteView, error)
 	}
 	return dest.view()
 }
+
 // 从其它机器获取数据.每一个分布式的服务都需要实现一个Get方法，接口描述文件在proto文件中
 func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView, error) {
 	req := &pb.GetRequest{
@@ -313,7 +315,7 @@ func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView
 		Key:   &key,
 	}
 	res := &pb.GetResponse{}
-	err := peer.Get(ctx, req, res)  //从远端得到数据
+	err := peer.Get(ctx, req, res) //从远端得到数据
 	if err != nil {
 		return ByteView{}, err
 	}
@@ -321,11 +323,12 @@ func (g *Group) getFromPeer(ctx Context, peer ProtoGetter, key string) (ByteView
 	// TODO(bradfitz): use res.MinuteQps or something smart to
 	// conditionally populate hotCache.  For now just do it some
 	// percentage of the time.
-	if rand.Intn(10) == 0 {    //哈哈，这里随机放在hotCache中,有意思
+	if rand.Intn(10) == 0 { //哈哈，这里随机放在hotCache中,有意思
 		g.populateCache(key, value, &g.hotCache)
 	}
 	return value, nil
 }
+
 //这个方法比较简单，从是从maincache和hotcache中读取数据
 func (g *Group) lookupCache(key string) (value ByteView, ok bool) {
 	if g.cacheBytes <= 0 {
@@ -415,6 +418,7 @@ func (c *cache) stats() CacheStats {
 		Evictions: c.nevict,
 	}
 }
+
 // 往cache中添加键值对
 func (c *cache) add(key string, value ByteView) {
 	c.mu.Lock()

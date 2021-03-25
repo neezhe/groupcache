@@ -25,8 +25,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/golang/groupcache/consistenthash"
-	pb "github.com/golang/groupcache/groupcachepb"
+	"groupcache/consistenthash"
+	pb "groupcache/groupcachepb"
+
 	"github.com/golang/protobuf/proto"
 )
 
@@ -61,19 +62,19 @@ type HTTPPool struct {
 type HTTPPoolOptions struct {
 	// BasePath specifies the HTTP path that will serve groupcache requests.
 	// If blank, it defaults to "/_groupcache/".
-	BasePath string  // http服务地址前缀，默认为 "/_groupcache/".
+	BasePath string // http服务地址前缀，默认为 "/_groupcache/".
 
 	// Replicas specifies the number of key replicas on the consistent hash.
 	// If blank, it defaults to 50.
-	Replicas int  // 分布式一致性hash中虚拟节点数量，默认 50.
+	Replicas int // 分布式一致性hash中虚拟节点数量，默认 50.
 
 	// HashFn specifies the hash function of the consistent hash.
 	// If blank, it defaults to crc32.ChecksumIEEE.
-	HashFn consistenthash.Hash    // 分布式一致性hash的hash算法，默认 crc32.ChecksumIEEE.
+	HashFn consistenthash.Hash // 分布式一致性hash的hash算法，默认 crc32.ChecksumIEEE.
 }
 
 //初始化一个对等节点的HTTPPool,把自己注册成一个对等节点选取器，也把自己注册成p.opts.BasePath路由的处理器。
-func NewHTTPPool(self string) *HTTPPool {//参数必须为当前服务器的url,如"http://example.net:8000"
+func NewHTTPPool(self string) *HTTPPool { //参数必须为当前服务器的url,如"http://example.net:8000"
 	p := NewHTTPPoolOpts(self, nil) // 初始化HTTPPool，该函数不能重复调用，否则会panic，HTTPPool也是一个http处理器
 	//语法：所指定的handle pattern是“/”，则匹配所有的pattern；而“/foo/”则会匹配所有“/foo/*”，golang默认的http处理器是不会检查访问的方法的，无论是get还是post,都可以访问到。
 	http.Handle(p.opts.BasePath, p) //这个函数默认会注册一个路由p.opts.BasePath，该路由主要用户节点间获取数据的功能."/_groupcache/",就是说节点向访问就使用这个路由，处理函数就是HTTPPool的ServerHttp函数。
@@ -92,7 +93,7 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	httpPoolMade = true
 
 	p := &HTTPPool{
-		self:        self, //使用self参数（基础节点的url）初始化一个 HTTPPool对象
+		self:        self,                         //使用self参数（基础节点的url）初始化一个 HTTPPool对象
 		httpGetters: make(map[string]*httpGetter), //在下面的Set中被填充
 	}
 	if o != nil {
@@ -104,9 +105,9 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	if p.opts.Replicas == 0 {
 		p.opts.Replicas = defaultReplicas //默认复制节点的个数
 	}
-	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)  // 根据虚拟节点数量和哈希函数创建一致性哈希节点对象,但是此处并没有创建key或者hashmap，本机节点默认这两个值是0
+	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn) // 根据虚拟节点数量和哈希函数创建一致性哈希节点对象,但是此处并没有创建key或者hashmap，本机节点默认这两个值是0
 
-	RegisterPeerPicker(func() PeerPicker { return p })  // 注册peers.portPicker
+	RegisterPeerPicker(func() PeerPicker { return p }) // 注册peers.portPicker,看到没，此处就是用的是闭包，这个p是存放在堆上的。
 	return p
 }
 
@@ -133,11 +134,12 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) { // 用一致性has
 	if peer := p.peers.Get(key); peer != p.self { //如果拿到的节点地址不是本机的节点地址
 		return p.httpGetters[peer], true
 	}
-	return nil, false
+	return nil, false //如果查节点，查到自己，那后续就不用再从其他节点拿数据了
 }
+
 // 根据请求的路径获取Group和Key，发送请求并返回结果
 //请求历经类似为https://example.net:8000/_groupcache/groupname/key
-func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) { // 用于处理通过HTTP传递过来的grpc请求
+func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) { // 用于处理其他节点通过HTTP传递过来的http请求
 	// Parse request.
 	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) { // 判断URL前缀是否合法
 		panic("HTTPPool serving unexpected path: " + r.URL.Path)
@@ -151,13 +153,13 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) { // 用于
 	key := parts[1]
 
 	// Fetch the value for this group/key.
-	group := GetGroup(groupName)  // 根据url中提取的groupname获取group
+	group := GetGroup(groupName) // 根据url中提取的groupname获取group
 	if group == nil {
 		http.Error(w, "no such group: "+groupName, http.StatusNotFound)
 		return
 	}
 	var ctx Context
-	if p.Context != nil {  // 如Context不为空，说明需要使用定制的context
+	if p.Context != nil { // 如Context不为空，说明需要使用定制的context
 		ctx = p.Context(r)
 	}
 
@@ -176,7 +178,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) { // 用于
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-protobuf") // 设置http头
-	w.Write(body) //设置http  body
+	w.Write(body)                                            //设置http  body
 }
 
 type httpGetter struct { // 这里实际上实现了Peer模块中的ProtoGetter接口
@@ -187,19 +189,20 @@ type httpGetter struct { // 这里实际上实现了Peer模块中的ProtoGetter�
 var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
+
 //第二个参数是
 // req := &pb.GetRequest{
 //		Group: &g.name,
 //		Key:   &key,
 //	}
 func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse) error { //该方法根据需要向对等节点查询缓存
-	u := fmt.Sprintf(  // 生成请求url，https://example.net:8000/_groupcache/groupname/key，
+	u := fmt.Sprintf( // 生成请求url，https://example.net:8000/_groupcache/groupname/key，
 		"%v%v/%v",
 		h.baseURL,
 		url.QueryEscape(in.GetGroup()),
 		url.QueryEscape(in.GetKey()),
 	)
-	req, err := http.NewRequest("GET", u, nil)  // 新建Get请求
+	req, err := http.NewRequest("GET", u, nil) // 新建Get请求
 	if err != nil {
 		return err
 	}
@@ -216,9 +219,9 @@ func (h *httpGetter) Get(context Context, in *pb.GetRequest, out *pb.GetResponse
 		return fmt.Errorf("server returned: %v", res.Status)
 	}
 	b := bufferPool.Get().(*bytes.Buffer) // 这里用到了go 提供的 sync.Pool，对字节缓冲数组进行复用，避免了反复申请（缓存期为两次gc之间）
-	b.Reset() //字节缓冲重置
+	b.Reset()                             //字节缓冲重置
 	defer bufferPool.Put(b)
-	_, err = io.Copy(b, res.Body)  //字节缓冲填充
+	_, err = io.Copy(b, res.Body) //字节缓冲填充
 	if err != nil {
 		return fmt.Errorf("reading response body: %v", err)
 	}
